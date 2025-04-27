@@ -18,7 +18,7 @@ app.get('/', (req, res) => {
   res.send('ok!');
 });
 
-// Endpoint para registrar leituras de fluxo
+// Endpoint para registrar (ou atualizar) leituras de fluxo
 app.post('/fluxo', async (req, res) => {
   const { litros, mililitros, timestamp, deviceId } = req.body;
 
@@ -28,25 +28,25 @@ app.post('/fluxo', async (req, res) => {
 
   const { error } = await supabase
     .from('leituras')
-    .insert([
+    .upsert([
       {
         device_id: deviceId,
         litros: litros,
         mililitros: mililitros,
         timestamp: new Date(Number(timestamp))
       }
-    ]);
+    ], { onConflict: ['device_id'] });
 
   if (error) {
-    console.error('Erro ao inserir leitura:', error);
-    return res.status(500).json({ error: 'Erro ao registrar leitura' });
+    console.error('Erro ao registrar/atualizar leitura:', error);
+    return res.status(500).json({ error: 'Erro ao registrar/atualizar leitura' });
   }
 
-  console.log('Nova leitura salva');
-  res.status(200).json({ message: 'Leitura registrada' });
+  console.log('Leitura salva/atualizada');
+  res.status(200).json({ message: 'Leitura registrada/atualizada' });
 });
 
-// Endpoint para compactar leituras
+// Endpoint para limpar leituras antigas e manter só as últimas 20
 app.post('/compactar', async (req, res) => {
   const { deviceId } = req.body;
 
@@ -54,15 +54,37 @@ app.post('/compactar', async (req, res) => {
     return res.status(400).json({ error: 'deviceId é obrigatório' });
   }
 
-  const { data, error } = await supabase
-    .rpc('compactar_leituras', { p_device_id: deviceId });
+  const { data: leituras, error: fetchError } = await supabase
+    .from('leituras')
+    .select('id')
+    .eq('device_id', deviceId)
+    .order('created_at', { ascending: false })
+    .range(20, 100000);
 
-  if (error) {
-    console.error('Erro ao compactar leituras:', error);
-    return res.status(500).json({ error: 'Erro ao compactar leituras' });
+  if (fetchError) {
+    console.error('Erro ao buscar leituras para compactar:', fetchError);
+    return res.status(500).json({ error: 'Erro ao buscar leituras' });
   }
 
-  res.status(200).json({ message: 'Compactação realizada com sucesso' });
+  if (leituras.length > 0) {
+    const idsParaExcluir = leituras.map(l => l.id);
+
+    const { error: deleteError } = await supabase
+      .from('leituras')
+      .delete()
+      .in('id', idsParaExcluir);
+
+    if (deleteError) {
+      console.error('Erro ao deletar leituras:', deleteError);
+      return res.status(500).json({ error: 'Erro ao deletar leituras' });
+    }
+
+    console.log(`Leituras antigas removidas para o device ${deviceId}`);
+    return res.status(200).json({ message: 'Leituras antigas removidas com sucesso' });
+  } else {
+    console.log(`Nada para remover para o device ${deviceId}`);
+    return res.status(200).json({ message: 'Nenhuma leitura antiga para remover' });
+  }
 });
 
 // Endpoint para buscar leituras recentes
@@ -97,6 +119,79 @@ app.get('/leituras', async (req, res) => {
   if (error) {
     console.error('Erro ao buscar todas leituras:', error);
     return res.status(500).json({ error: 'Erro ao buscar leituras' });
+  }
+
+  res.json(data);
+});
+
+// Endpoint para atualizar fluxo diário
+app.post('/fluxo-diario', async (req, res) => {
+  const { deviceId, litrosTotal, data } = req.body;
+
+  if (!deviceId || litrosTotal == null || !data) {
+    return res.status(400).json({ error: 'deviceId, litrosTotal e data são obrigatórios' });
+  }
+
+  // Primeiro tenta fazer update
+  const { data: existing, error: fetchError } = await supabase
+    .from('leituras_diarias')
+    .select('id')
+    .eq('device_id', deviceId)
+    .eq('data', data)
+    .maybeSingle();
+
+  if (fetchError) {
+    console.error('Erro ao buscar leitura diária:', fetchError);
+    return res.status(500).json({ error: 'Erro ao buscar leitura diária' });
+  }
+
+  if (existing) {
+    // Já existe, faz update
+    const { error: updateError } = await supabase
+      .from('leituras_diarias')
+      .update({ litros_total: litrosTotal })
+      .eq('id', existing.id);
+
+    if (updateError) {
+      console.error('Erro ao atualizar leitura diária:', updateError);
+      return res.status(500).json({ error: 'Erro ao atualizar leitura diária' });
+    }
+
+    res.status(200).json({ message: 'Leitura diária atualizada' });
+  } else {
+    // Não existe, cria novo
+    const { error: insertError } = await supabase
+      .from('leituras_diarias')
+      .insert([
+        { device_id: deviceId, data: data, litros_total: litrosTotal }
+      ]);
+
+    if (insertError) {
+      console.error('Erro ao inserir leitura diária:', insertError);
+      return res.status(500).json({ error: 'Erro ao inserir leitura diária' });
+    }
+
+    res.status(201).json({ message: 'Leitura diária criada' });
+  }
+});
+
+// Endpoint para buscar histórico diário
+app.get('/leituras-diarias/:deviceId', async (req, res) => {
+  const { deviceId } = req.params;
+
+  if (!deviceId) {
+    return res.status(400).json({ error: 'deviceId é obrigatório' });
+  }
+
+  const { data, error } = await supabase
+    .from('leituras_diarias')
+    .select('*')
+    .eq('device_id', deviceId)
+    .order('data', { ascending: true });
+
+  if (error) {
+    console.error('Erro ao buscar leituras diárias:', error);
+    return res.status(500).json({ error: 'Erro ao buscar leituras diárias' });
   }
 
   res.json(data);
