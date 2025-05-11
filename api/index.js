@@ -178,24 +178,34 @@ app.post('/fluxo-diario', async (req, res) => {
 // Endpoint para buscar histórico diário
 app.get('/leituras-diarias/:deviceId', async (req, res) => {
   const { deviceId } = req.params;
+  const dias = parseInt(req.query.dias);
 
   if (!deviceId) {
     return res.status(400).json({ error: 'deviceId é obrigatório' });
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('leituras_diarias')
     .select('*')
     .eq('device_id', deviceId)
-    .order('data', { ascending: true });
+    .order('data', { ascending: false });
+
+  if (!isNaN(dias)) {
+    query = query.limit(dias);
+  }
+
+  const { data, error } = await query;
 
   if (error) {
     console.error('Erro ao buscar leituras diárias:', error);
     return res.status(500).json({ error: 'Erro ao buscar leituras diárias' });
   }
 
-  res.json(data);
+  const resultadoFinal = !isNaN(dias) ? data.reverse() : data;
+
+  res.json(resultadoFinal);
 });
+
 
 module.exports = app;
 module.exports.handler = serverless(app);
