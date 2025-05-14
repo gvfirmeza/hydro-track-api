@@ -20,29 +20,32 @@ app.get('/', (req, res) => {
 
 // Endpoint para registrar (ou atualizar) leituras de fluxo
 app.post('/fluxo', async (req, res) => {
-  const { litros, mililitros, timestamp, deviceId } = req.body;
+  const { litros, mililitros, deviceId } = req.body;
 
-  if (litros == null || mililitros == null || !timestamp || !deviceId) {
+  if (litros == null || mililitros == null || !deviceId) {
     return res.status(400).json({ error: 'Dados incompletos' });
   }
 
+  const timestamp = new Date();
+
   const { error } = await supabase
     .from('leituras')
-    .upsert([
-      {
+    .upsert(
+      [{
         device_id: deviceId,
         litros: litros,
         mililitros: mililitros,
-        timestamp: new Date(Number(timestamp))
-      }
-    ], { onConflict: ['device_id'] });
+        timestamp: timestamp,
+      }],
+      { onConflict: ['device_id'] }
+    );
 
   if (error) {
     console.error('Erro ao registrar/atualizar leitura:', error);
     return res.status(500).json({ error: 'Erro ao registrar/atualizar leitura' });
   }
 
-  console.log('Leitura salva/atualizada');
+  console.log(`[${timestamp.toISOString()}] Leitura salva/atualizada para ${deviceId}`);
   res.status(200).json({ message: 'Leitura registrada/atualizada' });
 });
 
