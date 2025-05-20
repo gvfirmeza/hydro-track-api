@@ -49,47 +49,6 @@ app.post('/fluxo', async (req, res) => {
   res.status(200).json({ message: 'Leitura registrada/atualizada' });
 });
 
-// Endpoint para limpar leituras antigas e manter só as últimas 20
-app.post('/compactar', async (req, res) => {
-  const { deviceId } = req.body;
-
-  if (!deviceId) {
-    return res.status(400).json({ error: 'deviceId é obrigatório' });
-  }
-
-  const { data: leituras, error: fetchError } = await supabase
-    .from('leituras')
-    .select('id')
-    .eq('device_id', deviceId)
-    .order('created_at', { ascending: false })
-    .range(20, 100000);
-
-  if (fetchError) {
-    console.error('Erro ao buscar leituras para compactar:', fetchError);
-    return res.status(500).json({ error: 'Erro ao buscar leituras' });
-  }
-
-  if (leituras.length > 0) {
-    const idsParaExcluir = leituras.map(l => l.id);
-
-    const { error: deleteError } = await supabase
-      .from('leituras')
-      .delete()
-      .in('id', idsParaExcluir);
-
-    if (deleteError) {
-      console.error('Erro ao deletar leituras:', deleteError);
-      return res.status(500).json({ error: 'Erro ao deletar leituras' });
-    }
-
-    console.log(`Leituras antigas removidas para o device ${deviceId}`);
-    return res.status(200).json({ message: 'Leituras antigas removidas com sucesso' });
-  } else {
-    console.log(`Nada para remover para o device ${deviceId}`);
-    return res.status(200).json({ message: 'Nenhuma leitura antiga para remover' });
-  }
-});
-
 // Endpoint para buscar leituras recentes
 app.get('/fluxo/recentes/:deviceId', async (req, res) => {
   const { deviceId } = req.params;
@@ -129,13 +88,12 @@ app.get('/leituras', async (req, res) => {
 
 // Endpoint para atualizar fluxo diário
 app.post('/fluxo-diario', async (req, res) => {
-  const { deviceId, litrosTotal, data } = req.body;
+  const { deviceId, litrosTotal, data, adminId } = req.body;
 
-  if (!deviceId || litrosTotal == null || !data) {
-    return res.status(400).json({ error: 'deviceId, litrosTotal e data são obrigatórios' });
+  if (!deviceId || litrosTotal == null || !data || !adminId) {
+    return res.status(400).json({ error: 'deviceId, litrosTotal, data e adminId são obrigatórios' });
   }
 
-  // Primeiro tenta fazer update
   const { data: existing, error: fetchError } = await supabase
     .from('leituras_diarias')
     .select('id')
@@ -149,10 +107,9 @@ app.post('/fluxo-diario', async (req, res) => {
   }
 
   if (existing) {
-    // Já existe, faz update
     const { error: updateError } = await supabase
       .from('leituras_diarias')
-      .update({ litros_total: litrosTotal })
+      .update({ litros_total: litrosTotal, admin_id: adminId })
       .eq('id', existing.id);
 
     if (updateError) {
@@ -162,11 +119,10 @@ app.post('/fluxo-diario', async (req, res) => {
 
     res.status(200).json({ message: 'Leitura diária atualizada' });
   } else {
-    // Não existe, cria novo
     const { error: insertError } = await supabase
       .from('leituras_diarias')
       .insert([
-        { device_id: deviceId, data: data, litros_total: litrosTotal }
+        { device_id: deviceId, data: data, litros_total: litrosTotal, admin_id: adminId }
       ]);
 
     if (insertError) {
