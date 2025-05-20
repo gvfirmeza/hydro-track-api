@@ -165,6 +165,37 @@ app.get('/leituras-diarias/:deviceId', async (req, res) => {
   res.json(resultadoFinal);
 });
 
+// Endpoint para buscar leituras diárias por admin
+app.get('/leituras-diarias/admin/:adminId', async (req, res) => {
+  const { adminId } = req.params;
+  const dias = parseInt(req.query.dias);
+
+  if (!adminId) {
+    return res.status(400).json({ error: 'adminId é obrigatório' });
+  }
+
+  let query = supabase
+    .from('leituras_diarias')
+    .select('*')
+    .eq('admin_id', adminId)
+    .order('data', { ascending: false });
+
+  if (!isNaN(dias)) {
+    query = query.limit(dias);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Erro ao buscar leituras diárias por admin:', error);
+    return res.status(500).json({ error: 'Erro ao buscar leituras diárias por admin' });
+  }
+
+  const resultadoFinal = !isNaN(dias) ? data.reverse() : data;
+
+  res.json(resultadoFinal);
+});
+
 
 module.exports = app;
 module.exports.handler = serverless(app);
